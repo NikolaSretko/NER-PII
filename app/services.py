@@ -1,52 +1,77 @@
-import spacy
 import re
+import spacy
+from spacy.tokens import Span
+from .tech_whitelist import tech_whitelist  # Whitelist importieren
 
-# Lade das deutsche Modell
 nlp = spacy.load("de_core_news_sm")
 
-def analyze_and_anonymize_text(text):
-    doc = nlp(text)
+def preprocess_text(text):
+    """Entfernt unerwünschte Zeichen und formatiert den Text."""
+    unwanted_chars = ['\u2022', '\u25e6', '\u2023', '\uf0b7']
+    for char in unwanted_chars:
+        text = text.replace(char, '')
+    return text.strip()
 
-    anonymized_text = text  # Originaltext
-    replacements = {}
+def anonymize_phone_numbers(text):
+    """Entfernt zuverlässig alle Telefonnummern."""
+phone_pattern = r'''
+        (?:(?:\+|00)49|0)?                    # Optionale Landesvorwahl (+49, 0049) oder führende Null
+        [\s./-]*                             # Beliebige Trennzeichen
+        (?:\(?\d{2,5}\)?)[\s./-]*         # Vorwahl mit oder ohne Klammern
+        \d{1,5}[\s./-]*                     # Erster Teil der Hauptnummer
+        \d{1,5}[\s./-]*                     # Zweiter Teil der Hauptnummer
+        (?:\d{1,5})?                        # Optionaler dritter Teil der Hauptnummer
+        (?!\d)                              # Stellt sicher, dass keine weiteren Ziffern folgen
+        |                                     # Oder: Alternative internationale Formate
+        \+\d{1,3}[\s./-]*\d{1,4}[\s./-]*\d{1,4}[\s./-]*\d{1,9} # Generische internationale Nummern
+        |                                     # Oder: US-Format
+        \(\d{3}\)[\s./-]*\d{3}[\s./-]*\d{4}            # Nummern im (123) 456-7890-Format
+        \b                         # Wortgrenze
+    '''
+    return re.sub(phone_pattern, '[TELEFONNUMMER ENTFERNT]', text, flags=re.VERBOSE)
 
-    # Whitelist für Technologien und Begriffe, die erhalten bleiben sollen
-    tech_whitelist = {"Angular", "Vue.js", "Node.js", "Lambda", "CloudFront", "AWS", "Knex.js"}
-    general_whitelist = {"GitLab", "SSL-Zertifikate", "Server", "Frontend", "Backend"}
-
-    # E-Mail-Muster definieren
+def anonymize_email_addresses(text):
+    """Entfernt E-Mail-Adressen aus dem Text."""
     email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-    emails_found = re.findall(email_pattern, text)
+    return re.sub(email_pattern, '[E-MAIL ENTFERNT]', text)
 
-    for email in emails_found:
-        placeholder = "[EMAIL]"
-        replacements[email] = placeholder
-        anonymized_text = anonymized_text.replace(email, placeholder)
+def anonymize_personal_data_with_spacy(text):
+    """Anonymisiert personenbezogene Daten mit spaCy."""
+    doc = nlp(text)
+    new_ents = []
+    replacements = {}
+    first_person = None
 
-    # Adresse (Straße und PLZ) Muster definieren
-    address_pattern = r'\b[A-Za-zäöüßÄÖÜ]+(?:\s[A-Za-zäöüßÄÖÜ]+)*\s(?:Str\.|Straße|Platz|Weg|Allee)\s\d{1,5},\s\d{5}\b'
-    addresses_found = re.findall(address_pattern, text)
-
-    for address in addresses_found:
-        placeholder = "[ADDRESS]"
-        replacements[address] = placeholder
-        anonymized_text = anonymized_text.replace(address, placeholder)
-
-    # Gehe durch alle erkannte Entitäten von spaCy
     for ent in doc.ents:
-        # Überspringe, wenn die Entität in einer Whitelist steht
-        if ent.text in tech_whitelist or ent.text in general_whitelist:
+        if ent.text in tech_whitelist:
+            # Whitelisted-Begriffe überspringen
+            new_ents.append(Span(doc, ent.start, ent.end, label="MISC"))
             continue
 
-        # Prüfe, ob die Entität anonymisiert werden soll
-        if ent.label_ in ["PER", "LOC", "ORG", "EMAIL", "PHONE"]:
-            placeholder = f"[{ent.label_}]"
-            replacements[ent.text] = placeholder
-            anonymized_text = anonymized_text.replace(ent.text, placeholder)
+        if ent.label_ == "PER" and not first_person:
+            first_person = ent.text  # Speichere den ersten Namen
 
-    # Rückgabe des Ergebnisses
+        placeholder = {
+            "PER": "[NAME ENTFERNT]",
+            "LOC": "[ORT ENTFERNT]",
+            "ORG": "[ORGANISATION ENTFERNT]",
+            "GPE": "[ORT ENTFERNT]"
+        }.get(ent.label_, None)
+
+        if placeholder:
+            replacements[ent.text] = placeholder
+            text = text.replace(ent.text, placeholder)
+
+    doc.ents = new_ents
+    return text, first_person
+
+def anonymize_text(text):
+    """Hauptfunktion zur Anonymisierung."""
+    text = preprocess_text(text)
+    text = anonymize_phone_numbers(text)  # Telefonnummern entfernen
+    text = anonymize_email_addresses(text)  # E-Mails entfernen
+    text, first_person = anonymize_personal_data_with_spacy(text)  # spaCy-Daten anonymisieren
     return {
-        "tokens": [token.text for token in doc],
-        "entities": [{"text": ent.text, "label": ent.label_} for ent in doc.ents],
-        "anonymized_text": anonymized_text,
+        "anonymized_text": text.strip(),
+        "first_person": first_person,
     }
