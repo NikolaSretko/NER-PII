@@ -14,18 +14,12 @@ def preprocess_text(text):
 
 def anonymize_phone_numbers(text):
     """Entfernt zuverlässig alle Telefonnummern."""
-phone_pattern = r'''
-        (?:(?:\+|00)49|0)?                    # Optionale Landesvorwahl (+49, 0049) oder führende Null
-        [\s./-]*                             # Beliebige Trennzeichen
-        (?:\(?\d{2,5}\)?)[\s./-]*         # Vorwahl mit oder ohne Klammern
-        \d{1,5}[\s./-]*                     # Erster Teil der Hauptnummer
-        \d{1,5}[\s./-]*                     # Zweiter Teil der Hauptnummer
-        (?:\d{1,5})?                        # Optionaler dritter Teil der Hauptnummer
-        (?!\d)                              # Stellt sicher, dass keine weiteren Ziffern folgen
-        |                                     # Oder: Alternative internationale Formate
-        \+\d{1,3}[\s./-]*\d{1,4}[\s./-]*\d{1,4}[\s./-]*\d{1,9} # Generische internationale Nummern
-        |                                     # Oder: US-Format
-        \(\d{3}\)[\s./-]*\d{3}[\s./-]*\d{4}            # Nummern im (123) 456-7890-Format
+    phone_pattern = r'''
+        (?:(?:\+|00)49)?           # Deutsche Landesvorwahl optional
+        [-.\s]?\(?\d{2,4}\)?       # Optionale Vorwahl mit Klammern
+        [-.\s]?\d{2,5}             # Hauptnummer-Teil 1
+        [-.\s]?\d{2,5}             # Hauptnummer-Teil 2
+        (?:[-.\s]?\d{1,5})?        # Optionale Endziffern
         \b                         # Wortgrenze
     '''
     return re.sub(phone_pattern, '[TELEFONNUMMER ENTFERNT]', text, flags=re.VERBOSE)
